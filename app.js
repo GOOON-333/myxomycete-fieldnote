@@ -1,7 +1,9 @@
-const $=id=>document.getElementById(id);const FIELDS=['number','date','collector','species','specimenStatus','prefecture','locality','latitude','longitude','accuracy','altitude','altitudeAccuracy','forest','treeType','treeDetail','substrate','substrateDetail','decay','moss','position','height','overview','notes'];const GROUPS={forest:'樹林',tree:'基物樹種',substrate:'基物',decay:'腐朽型',moss:'コケ上',position:'発生位置',height:'発生高さ',diameters:'太さ',ph:'pH',hardness:'硬さ'};const MEAS={diameters:1,ph:1,hardness:1};let db,currentId=null,photos=[],previous=null,settings={visible:{},defaultCollector:'',gpsDuration:15},dirtyTimer,seq=0;const uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2);const nowDate=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+const $=id=>document.getElementById(id);const FIELDS=['number','date','event','collector','species','specimenStatus','prefecture','locality','latitude','longitude','accuracy','altitude','altitudeAccuracy','forest','treeType','treeDetail','substrate','substrateDetail','decay','moss','position','height','overview','notes'];const GROUPS={forest:'樹林',tree:'基物樹種',substrate:'基物',decay:'腐朽型',moss:'コケ上',position:'発生位置',height:'発生高さ',diameters:'太さ',ph:'pH',hardness:'硬さ'};const MEAS={diameters:1,ph:1,hardness:1};let db,currentId=null,photos=[],previous=null,settings={visible:{},defaultCollector:'',gpsDuration:15},dirtyTimer,seq=0;const uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2);const nowDate=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
 function alertMsg(t,ok=true){let n=$('message');n.textContent=t;n.className='notice'+(ok?' ok':'');window.scrollTo({top:0,behavior:'smooth'});setTimeout(()=>n.classList.add('hidden'),5500)}
 // Preserve all individual measurements; remove average displays and CSV columns.
 queueMicrotask(()=>{
+    // Align the new event field before removing legacy average columns.
+    if(csvNames.length===csvFields.length-1)csvNames.splice(2,0,'イベント');
     for(const key of ['diameters','ph','hardness'])$(key+'Mean')?.remove();
     for(let i=csvFields.length-1;i>=0;i--){
         if(['diametersMean','phMean','hardnessMean'].includes(csvFields[i])){
@@ -13,7 +15,17 @@ const measurementHeadingStyle=document.createElement('style');
 measurementHeadingStyle.textContent='[data-config="diameters"] > label,[data-config="ph"] > label,[data-config="hardness"] > label{font-size:18px;font-weight:800;line-height:1.5;color:#183e33;margin:22px 0 10px;letter-spacing:.01em}';
 document.head.append(measurementHeadingStyle);
 function addAltitudeControls(){const container=document.createElement('div');container.className='grid';container.style.marginTop='12px';container.innerHTML='<div class="field"><label for="altitude">標高（m・手動修正可）</label><input type="number" step="any" id="altitude" placeholder="未取得"></div><div class="field"><label for="altitudeAccuracy">垂直精度（±m）</label><input type="number" step="any" min="0" id="altitudeAccuracy" placeholder="未取得"></div><div class="field full"><label for="gpsDuration">GPS測位時間</label><select id="gpsDuration"><option value="5">5秒 — 省電力</option><option value="15">15秒 — 標準</option><option value="30">30秒 — 精度重視</option></select><div class="small">緯度・経度と標高を同時に取得します。iPhoneの環境によっては標高が取得できません。</div></div>'; $('gpsStatus').before(container);$('gpsDuration').value=String([5,15,30].includes(+settings.gpsDuration)?settings.gpsDuration:15);$('gpsDuration').addEventListener('change',async()=>{settings.gpsDuration=+$('gpsDuration').value;await put('meta',settings,'settings')})}
-function addSpecimenControls(){let field=document.createElement('div');field.className='field';field.innerHTML='<label for="specimenStatus">標本の有無</label><select id="specimenStatus"><option value="">未選択</option><option value="標本あり">標本あり</option><option value="記録のみ">記録のみ</option></select>';const species=$('species').closest('.field');species.after(field);enhanceChoiceFields()}
+function addSpecimenControls(){let field=document.createElement('div');field.className='field';field.innerHTML='<label for="specimenStatus">標本の有無</label><select id="specimenStatus"><option value="">未選択</option><option value="標本あり">標本あり</option><option value="記録のみ">記録のみ</option></select>';const species=$('species').closest('.field');species.after(field);setupEventLayout();enhanceChoiceFields()}
+function setupEventLayout(){
+    const grid=$('number').closest('.grid');
+    const event=document.createElement('div');
+    event.className='field full';
+    event.innerHTML='<label for="event">イベント</label><div class="measure-row"><input id="event" placeholder="例：横倉山調査会"><button type="button" data-copy="event" title="前回値">↶</button></div>';
+    for(const id of ['number','date'])grid.append($(id).closest('.field'));
+    grid.append(event);
+    for(const id of ['prefecture','locality','collector','specimenStatus'])grid.append($(id).closest('.field'));
+    const species=$('species').closest('.field');species.classList.add('full');grid.append(species);
+}
 // Mobile-friendly direct choices and type-ahead suggestions.
 function enhanceChoiceFields(){
     const style=document.createElement('style');
