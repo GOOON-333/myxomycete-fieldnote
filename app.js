@@ -15,7 +15,18 @@ const measurementHeadingStyle=document.createElement('style');
 measurementHeadingStyle.textContent='[data-config="diameters"] > label,[data-config="ph"] > label,[data-config="hardness"] > label{font-size:18px;font-weight:800;line-height:1.5;color:#183e33;margin:22px 0 10px;letter-spacing:.01em}';
 document.head.append(measurementHeadingStyle);
 function addAltitudeControls(){const container=document.createElement('div');container.className='grid';container.style.marginTop='12px';container.innerHTML='<div class="field"><label for="altitude">標高（m・手動修正可）</label><input type="number" step="any" id="altitude" placeholder="未取得"></div><div class="field"><label for="altitudeAccuracy">垂直精度（±m）</label><input type="number" step="any" min="0" id="altitudeAccuracy" placeholder="未取得"></div><div class="field full"><label for="gpsDuration">GPS測位時間</label><select id="gpsDuration"><option value="5">5秒 — 省電力</option><option value="15">15秒 — 標準</option><option value="30">30秒 — 精度重視</option></select><div class="small">緯度・経度と標高を同時に取得します。iPhoneの環境によっては標高が取得できません。</div></div>'; $('gpsStatus').before(container);$('gpsDuration').value=String([5,15,30].includes(+settings.gpsDuration)?settings.gpsDuration:15);$('gpsDuration').addEventListener('change',async()=>{settings.gpsDuration=+$('gpsDuration').value;await put('meta',settings,'settings')})}
-function addSpecimenControls(){let field=document.createElement('div');field.className='field';field.innerHTML='<label for="specimenStatus">標本の有無</label><select id="specimenStatus"><option value="">未選択</option><option value="標本あり">標本あり</option><option value="記録のみ">記録のみ</option></select>';const species=$('species').closest('.field');species.after(field);setupEventLayout();enhanceChoiceFields()}
+function addSpecimenControls(){let field=document.createElement('div');field.className='field';field.innerHTML='<label for="specimenStatus">標本の有無</label><select id="specimenStatus"><option value="">未選択</option><option value="標本あり">標本あり</option><option value="記録のみ">記録のみ</option></select>';const species=$('species').closest('.field');species.after(field);setupEventLayout();layoutGpsFields();enhanceChoiceFields()}
+function layoutGpsFields(){
+    const grid=$('latitude').closest('.grid');
+    const extra=$('altitude').closest('.grid');
+    for(const id of ['gpsButton','altitude','latitude','longitude','accuracy','altitudeAccuracy','gpsDuration']){
+        const field=$(id).closest('.field');
+        if(id==='gpsDuration')field.classList.add('full');
+        grid.append(field);
+    }
+    extra.remove();
+    $('gpsDuration').closest('.field').querySelector('label').textContent='測位時間';
+}
 function setupEventLayout(){
     const grid=$('number').closest('.grid');
     const event=document.createElement('div');
