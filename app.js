@@ -143,7 +143,20 @@ function refreshChoiceFields(){
 function openDB(){return new Promise((res,rej)=>{let r=indexedDB.open('myxomycete-fieldnote',1);r.onupgradeneeded=()=>{let d=r.result;if(!d.objectStoreNames.contains('records'))d.createObjectStore('records',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta')};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}function dbop(store,method,...args){return new Promise((res,rej)=>{let t=db.transaction(store,method==='get'||method==='getAll'?'readonly':'readwrite'),r=t.objectStore(store)[method](...args);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}const getAll=s=>dbop(s,'getAll');const put=(s,v,key)=>key===undefined?dbop(s,'put',v):dbop(s,'put',v,key);const del=(s,id)=>dbop(s,'delete',id);
 function tab(name){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!==name));document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));if(name==='records')renderRecords();if(name==='settings')renderSettings();window.scrollTo(0,0)}
 function renderMeasures(k,values){let el=$(k+'Rows');el.innerHTML='';(values||Array(MEAS[k]).fill('')).forEach(v=>{let row=document.createElement('div');row.className='measure-row';let input=document.createElement('input');input.type='number';input.step='any';input.placeholder=`地点 ${el.children.length+1}`;input.value=v??'';input.addEventListener('input',draftSoon);let btn=document.createElement('button');btn.textContent='×';btn.type='button';btn.title='地点を削除';btn.onclick=()=>{row.remove();draftSoon()};row.append(input,btn);el.append(row)})}function measure(k){return [...$(k+'Rows').querySelectorAll('input')].map(x=>x.value)}
-async function nextNumber(){let all=await getAll('records');let today=nowDate().replaceAll('-','');let highest=all.reduce((max,r)=>{const match=String(r.number||'').match(new RegExp('^'+today+'-(\\d+)$'));return match?Math.max(max,+match[1]):max},0);seq=Math.max(seq,highest)+1;return today+'-'+String(seq).padStart(3,'0')}
+async function nextNumber(){
+    const today=nowDate().replaceAll('-','');
+    const key='record-number-max-'+today;
+    const used=await getAll('records');
+    const highest=used.reduce((max,r)=>{
+        const match=String(r.number||'').match(new RegExp('^'+today+'-(\\d+)$'));
+        return match?Math.max(max,Number(match[1])):max;
+    },0);
+    const remembered=Number(await dbop('meta','get',key))||0;
+    const next=Math.max(highest,remembered)+1;
+    // Keep the highest allocated number even when a record is deleted or renumbered.
+    await put('meta',next,key);
+    return today+'-'+String(next).padStart(3,'0');
+}
 function collect(){let r={id:currentId||uid(),updatedAt:new Date().toISOString()};FIELDS.forEach(k=>r[k]=$(k).value);for(let k in MEAS)r[k]=measure(k);r.photoIds=photos.map(p=>p.id);return r}
 function fill(r){currentId=r.id||null;FIELDS.forEach(k=>$(k).value=r[k]??'');for(let k in MEAS)renderMeasures(k,r[k]);refreshChoiceFields();$('formTitle').textContent=currentId?'記録を編集':'新規採集記録';}
 async function fresh(){clearTimeout(dirtyTimer);const number=await nextNumber();photos=[];renderPhotos();fill({number,date:nowDate(),collector:settings.defaultCollector||previous?.collector||'',prefecture:previous?.prefecture||'',locality:previous?.locality||'',forest:previous?.forest||''});await dbop('meta','delete','draft');$('draftStatus').textContent='新規記録の入力を開始しました。';tab('edit')}
