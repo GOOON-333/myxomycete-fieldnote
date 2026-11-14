@@ -13,15 +13,97 @@ const measurementHeadingStyle=document.createElement('style');
 measurementHeadingStyle.textContent='[data-config="diameters"] > label,[data-config="ph"] > label,[data-config="hardness"] > label{font-size:18px;font-weight:800;line-height:1.5;color:#183e33;margin:22px 0 10px;letter-spacing:.01em}';
 document.head.append(measurementHeadingStyle);
 function addAltitudeControls(){const container=document.createElement('div');container.className='grid';container.style.marginTop='12px';container.innerHTML='<div class="field"><label for="altitude">標高（m・手動修正可）</label><input type="number" step="any" id="altitude" placeholder="未取得"></div><div class="field"><label for="altitudeAccuracy">垂直精度（±m）</label><input type="number" step="any" min="0" id="altitudeAccuracy" placeholder="未取得"></div><div class="field full"><label for="gpsDuration">GPS測位時間</label><select id="gpsDuration"><option value="5">5秒 — 省電力</option><option value="15">15秒 — 標準</option><option value="30">30秒 — 精度重視</option></select><div class="small">緯度・経度と標高を同時に取得します。iPhoneの環境によっては標高が取得できません。</div></div>'; $('gpsStatus').before(container);$('gpsDuration').value=String([5,15,30].includes(+settings.gpsDuration)?settings.gpsDuration:15);$('gpsDuration').addEventListener('change',async()=>{settings.gpsDuration=+$('gpsDuration').value;await put('meta',settings,'settings')})}
-function addSpecimenControls(){let field=document.createElement('div');field.className='field';field.innerHTML='<label for="specimenStatus">標本の有無</label><select id="specimenStatus"><option value="">未選択</option><option value="標本あり">標本あり</option><option value="記録のみ">記録のみ</option></select>';const species=$('species').closest('.field');species.after(field)}
+function addSpecimenControls(){let field=document.createElement('div');field.className='field';field.innerHTML='<label for="specimenStatus">標本の有無</label><select id="specimenStatus"><option value="">未選択</option><option value="標本あり">標本あり</option><option value="記録のみ">記録のみ</option></select>';const species=$('species').closest('.field');species.after(field);enhanceChoiceFields()}
+// Mobile-friendly direct choices and type-ahead suggestions.
+function enhanceChoiceFields(){
+    const style=document.createElement('style');
+    style.textContent=`
+      .grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+      .field{min-width:0;max-width:100%}
+      .choice-group{display:flex;gap:6px;flex-wrap:wrap}
+      .choice-pill{display:inline-flex;align-items:center;justify-content:center;flex:1;white-space:nowrap;gap:5px;border:1px solid #bdd2c3;background:#f7faf6;color:#285b45;padding:11px 7px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;min-height:44px}
+      .choice-pill.is-selected{background:#285b45;color:white;border-color:#285b45}
+      .choice-pill input{width:0;height:0;min-height:0;opacity:0;position:absolute}
+      .suggest-wrap{position:relative;min-width:0}
+      .suggest-wrap input{width:100%;min-width:0;font-size:16px}
+      .suggestions{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 3px);background:white;border:1px solid #b6cdbb;border-radius:11px;box-shadow:0 8px 24px #173e3326;max-height:230px;overflow:auto}
+      .suggestions button{display:block;width:100%;padding:12px;text-align:left;background:white;color:#234b37;border:0;border-bottom:1px solid #edf2ec;font-size:14px}
+      .suggestions button:last-child{border-bottom:0}
+      .suggestions button:active{background:#e5eee5}
+      @media(max-width:600px){
+        .number-field,.date-field{grid-column:auto!important;min-width:0!important}
+        .date-field input,#date{display:block;min-width:0!important;max-width:100%!important;width:100%!important;font-size:14px!important;padding:9px 6px!important;box-sizing:border-box!important;min-height:44px}
+        .number-field input{min-width:0;font-size:14px;padding:9px 6px}
+      }
+    `;
+    document.head.append(style);
+    // The iOS native date control can have an intrinsic width larger than its column.
+    // Keep the ISO date editable as text on phone screens to avoid horizontal overflow.
+    if(window.matchMedia('(max-width:600px)').matches){
+        const previous=$('date');
+        const replacement=document.createElement('input');
+        replacement.id='date';replacement.type='text';replacement.inputMode='numeric';
+        replacement.placeholder='YYYY-MM-DD';replacement.autocomplete='off';
+        replacement.setAttribute('aria-label','日付（年-月-日）');
+        replacement.value=previous.value;
+        previous.replaceWith(replacement);
+    }
+    const radioFields={specimenStatus:['標本あり','記録のみ'],moss:['はい','いいえ']};
+    for(const [id,choices] of Object.entries(radioFields)){
+        const original=$(id),group=document.createElement('div'),hidden=document.createElement('input');
+        hidden.type='hidden';hidden.id=id;hidden.value=original.value;
+        group.className='choice-group';group.dataset.forField=id;
+        for(const value of choices){
+            const label=document.createElement('label');label.className='choice-pill';
+            const radio=document.createElement('input');radio.type='radio';radio.name=id+'Choice';radio.value=value;
+            label.append(radio,document.createTextNode(value));
+            label.addEventListener('click',e=>{
+                e.preventDefault();hidden.value=value;refreshChoiceFields();
+                hidden.dispatchEvent(new Event('input',{bubbles:true}));
+            });
+            group.append(label);
+        }
+        original.replaceWith(hidden);hidden.after(group);
+    }
+    for(const id of ['treeType','substrate','decay','position','photoCategory']){
+        const original=$(id),values=[...original.options].map(o=>o.value).filter(Boolean),wrap=document.createElement('div'),input=document.createElement('input'),list=document.createElement('div');
+        wrap.className='suggest-wrap';list.className='suggestions hidden';
+        input.id=id;input.type='text';input.autocomplete='off';input.placeholder='入力または候補をタップ';
+        input.value=original.value;input.setAttribute('aria-label',original.closest('.field')?.querySelector('label')?.textContent||id);
+        function show(){
+            const q=input.value.trim();list.innerHTML='';
+            const matches=values.filter(v=>!q||v.includes(q));
+            for(const value of (matches.length?matches:values)){
+                const btn=document.createElement('button');btn.type='button';btn.textContent=value;
+                btn.addEventListener('pointerdown',e=>{e.preventDefault();input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));list.classList.add('hidden');input.blur()});
+                list.append(btn);
+            }
+            list.classList.remove('hidden');
+        }
+        input.addEventListener('focus',show);
+        input.addEventListener('input',show);
+        input.addEventListener('blur',()=>setTimeout(()=>list.classList.add('hidden'),220));
+        wrap.append(input,list);original.replaceWith(wrap);
+    }
+    document.addEventListener('pointerdown',e=>{if(!e.target.closest('.suggest-wrap'))document.querySelectorAll('.suggestions').forEach(x=>x.classList.add('hidden'))});
+}
+function refreshChoiceFields(){
+    for(const group of document.querySelectorAll('.choice-group')){
+        const selected=$(group.dataset.forField)?.value;
+        for(const label of group.querySelectorAll('.choice-pill')){
+            const radio=label.querySelector('input');radio.checked=radio.value===selected;
+            label.classList.toggle('is-selected',radio.checked);
+        }
+    }
+}
 function openDB(){return new Promise((res,rej)=>{let r=indexedDB.open('myxomycete-fieldnote',1);r.onupgradeneeded=()=>{let d=r.result;if(!d.objectStoreNames.contains('records'))d.createObjectStore('records',{keyPath:'id'});if(!d.objectStoreNames.contains('photos'))d.createObjectStore('photos',{keyPath:'id'});if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta')};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}function dbop(store,method,...args){return new Promise((res,rej)=>{let t=db.transaction(store,method==='get'||method==='getAll'?'readonly':'readwrite'),r=t.objectStore(store)[method](...args);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}const getAll=s=>dbop(s,'getAll');const put=(s,v,key)=>key===undefined?dbop(s,'put',v):dbop(s,'put',v,key);const del=(s,id)=>dbop(s,'delete',id);
 function tab(name){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!==name));document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));if(name==='records')renderRecords();if(name==='settings')renderSettings();window.scrollTo(0,0)}
 function renderMeasures(k,values){let el=$(k+'Rows');el.innerHTML='';(values||Array(MEAS[k]).fill('')).forEach(v=>{let row=document.createElement('div');row.className='measure-row';let input=document.createElement('input');input.type='number';input.step='any';input.placeholder=`地点 ${el.children.length+1}`;input.value=v??'';input.addEventListener('input',draftSoon);let btn=document.createElement('button');btn.textContent='×';btn.type='button';btn.title='地点を削除';btn.onclick=()=>{row.remove();draftSoon()};row.append(input,btn);el.append(row)})}function measure(k){return [...$(k+'Rows').querySelectorAll('input')].map(x=>x.value)}
 async function nextNumber(){let all=await getAll('records');let today=nowDate().replaceAll('-','');let highest=all.reduce((max,r)=>{const match=String(r.number||'').match(new RegExp('^'+today+'-(\\d+)$'));return match?Math.max(max,+match[1]):max},0);seq=Math.max(seq,highest)+1;return today+'-'+String(seq).padStart(3,'0')}
 function collect(){let r={id:currentId||uid(),updatedAt:new Date().toISOString()};FIELDS.forEach(k=>r[k]=$(k).value);for(let k in MEAS)r[k]=measure(k);r.photoIds=photos.map(p=>p.id);return r}
-function fill(r){currentId=r.id||null;FIELDS.forEach(k=>$(k).value=r[k]??'');for(let k in MEAS)renderMeasures(k,r[k]);$('formTitle').textContent=currentId?'記録を編集':'新規採集記録';}
+function fill(r){currentId=r.id||null;FIELDS.forEach(k=>$(k).value=r[k]??'');for(let k in MEAS)renderMeasures(k,r[k]);refreshChoiceFields();$('formTitle').textContent=currentId?'記録を編集':'新規採集記録';}
 async function fresh(){const number=await nextNumber();photos=[];renderPhotos();fill({number,date:nowDate(),collector:settings.defaultCollector||previous?.collector||'',prefecture:previous?.prefecture||'',locality:previous?.locality||'',forest:previous?.forest||''});await dbop('meta','delete','draft');$('draftStatus').textContent='新規記録の入力を開始しました。';tab('edit')}
-async function save(){try{let r=collect();r.number=r.number.trim();if(!r.date)throw Error('日付を入力してください');if(!r.number)throw Error('記録番号を入力してください');const duplicates=(await getAll('records')).filter(other=>other.id!==r.id&&String(other.number).trim()===r.number);if(duplicates.length){alertMsg('この記録番号は既に使用されています。別の番号を入力してください。',false);$('number').focus();return}for(const p of photos){if(p.blob)await put('photos',{id:p.id,blob:p.blob,category:p.category,name:p.name,type:p.type||p.blob.type})}await put('records',r);currentId=r.id;previous=r;await put('meta',{...r},'previous');await dbop('meta','delete','draft');$('formTitle').textContent='記録を編集';$('draftStatus').textContent='保存済み：'+new Date().toLocaleTimeString('ja-JP');alertMsg('採集記録を保存しました');}catch(e){alertMsg('保存できませんでした：'+e.message,false)}}
+async function save(){try{let r=collect();r.number=r.number.trim();if(!/^\d{4}-\d{2}-\d{2}$/.test(r.date)||Number.isNaN(Date.parse(r.date)))throw Error('日付をYYYY-MM-DD形式で入力してください');if(!r.number)throw Error('記録番号を入力してください');const duplicates=(await getAll('records')).filter(other=>other.id!==r.id&&String(other.number).trim()===r.number);if(duplicates.length){alertMsg('この記録番号は既に使用されています。別の番号を入力してください。',false);$('number').focus();return}for(const p of photos){if(p.blob)await put('photos',{id:p.id,blob:p.blob,category:p.category,name:p.name,type:p.type||p.blob.type})}await put('records',r);currentId=r.id;previous=r;await put('meta',{...r},'previous');await dbop('meta','delete','draft');$('formTitle').textContent='記録を編集';$('draftStatus').textContent='保存済み：'+new Date().toLocaleTimeString('ja-JP');alertMsg('採集記録を保存しました');}catch(e){alertMsg('保存できませんでした：'+e.message,false)}}
 function draftSoon(){clearTimeout(dirtyTimer);dirtyTimer=setTimeout(async()=>{try{await put('meta',{record:collect(),photos:photos.filter(p=>p.blob)},'draft');$('draftStatus').textContent='下書き保存：'+new Date().toLocaleTimeString('ja-JP')}catch(e){$('draftStatus').textContent='下書きを保存できません：容量を確認してください'}},600)}
 async function attach(files){try{for(let f of files){if(!f.type.startsWith('image/'))continue;const id=uid();photos.push({id,blob:f,category:$('photoCategory').value,name:f.name||id+'.jpg',type:f.type})}renderPhotos();draftSoon()}catch(e){alertMsg('写真の追加に失敗：'+e.message,false)}$('photoInput').value=''}
 function renderPhotos(){let root=$('photoGrid');root.innerHTML='';photos.forEach(p=>{let div=document.createElement('div');div.className='photo';const img=document.createElement('img');let url=URL.createObjectURL(p.blob);img.src=url;img.onload=()=>URL.revokeObjectURL(url);let meta=document.createElement('div');meta.className='meta';let sel=document.createElement('select');['野外','子実体','顕微鏡','その他'].forEach(c=>{let opt=document.createElement('option');opt.textContent=c;sel.append(opt)});sel.value=p.category;sel.onchange=()=>{p.category=sel.value;draftSoon()};let name=document.createElement('div');name.textContent=p.name;name.style.overflowWrap='anywhere';let b=document.createElement('button');b.textContent='削除';b.onclick=async()=>{photos=photos.filter(x=>x.id!==p.id);if(currentId)await del('photos',p.id);renderPhotos();draftSoon()};meta.append(sel,name);div.append(img,meta,b);root.append(div)})}
